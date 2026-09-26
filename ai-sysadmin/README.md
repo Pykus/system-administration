@@ -6,24 +6,23 @@
 
 WAZABIG does **not** replace those source systems. Zabbix remains the monitoring source, Wazuh the security source, and GLPI the asset/ticket source. WAZABIG acts as the layer that connects them and gives an administrator one place to reason about what is happening.
 
-**AI-SysAdmin** is the local AI/automation layer being built inside that architecture. It first receives deterministic, normalized operational data from WAZABIG; only then can AI-assisted diagnosis, explanation or remediation be added. This separation is intentional: raw alerts are not handed directly to an AI model and unknown conditions are not automatically “fixed”.
+**AI-SysAdmin** is the local AI/automation layer being built inside that architecture. It first receives deterministic, normalized operational data from WAZABIG; only then can AI-assisted diagnosis, explanation or remediation be added.
 
-This is the first practical AI-SysAdmin building block for WAZABIG.
+## Current practical status
 
-It converts events from several administrative sources into one small operational model before any AI-assisted diagnosis or remediation is attempted.
+The project now has two working layers:
 
-Supported input shapes in this first increment:
+1. a deterministic event normalizer for Zabbix, Wazuh, Windows Event Log and syslog-shaped events,
+2. a **read-only Zabbix adapter** that retrieves active problems through `problem.get`, resolves their hosts through `trigger.get`, attaches source evidence and generates a stable SHA-256 correlation key.
 
-- Zabbix
-- Wazuh
-- Windows Event Log exports
-- syslog
+The Zabbix adapter was tested against synthetic API responses and then smoke-tested against a live Zabbix API in the integration environment before publication. No production data, hostnames, addresses, tokens or raw events are included in this repository.
 
 ## Safety model
 
 - Unknown events are **not guessed**.
 - Unknown events fall back to `privileged_manual`.
-- Normalization does not execute remediation.
+- The Zabbix adapter is read-only.
+- Normalization and correlation do not execute remediation.
 - Public examples use synthetic hosts and data only.
 - Source systems remain authoritative.
 
@@ -31,27 +30,19 @@ Supported input shapes in this first increment:
 
 `source`, `entity`, `message`, `severity`, `problem_kind`, `summary`, `remediation_mode`.
 
-## Smoke test
+The Zabbix adapter adds:
 
-PowerShell:
+`source_event_id`, `source_object_id`, `observed_at`, `correlation_key`.
 
-```powershell
-$env:PYTHONPATH="$PWD\src"
-python smoke_test.py
-```
+## Why correlation comes before AI
 
-Expected result:
-
-```text
-AI_SYSADMIN_SMOKE_OK
-```
-
-The same smoke test was executed successfully in the integration environment before this code was published.
+Repeated source alerts should not be handed independently to an AI model. WAZABIG first creates a stable operational identity for the problem. AI-assisted diagnosis can then work on a grouped issue together with evidence instead of reacting to every raw alert.
 
 ## Next practical increments
 
-1. Read-only adapters for live Zabbix and Wazuh events.
-2. Stable correlation/deduplication keys across sources.
-3. Evidence attached to every diagnosis.
-4. Local AI-assisted explanation only after deterministic normalization.
-5. Approval-gated remediation with validation and audit logging.
+1. Persist correlation keys and deduplicate repeated Zabbix events into issues.
+2. Add the same read-only adapter contract for Wazuh.
+3. Correlate Zabbix and Wazuh signals to a canonical host.
+4. Attach source evidence to every diagnosis.
+5. Add local AI-assisted explanations only after deterministic correlation.
+6. Add approval-gated remediation with validation and audit logging.
