@@ -1,5 +1,13 @@
 # AI-SysAdmin — event normalization foundation
 
+## What is WAZABIG?
+
+**WAZABIG** is a lightweight infrastructure control plane that sits above tools such as **Zabbix, Wazuh and GLPI**. Its job is to combine monitoring, security and asset/service-management signals into one operational view: normalize events, correlate them with the same host or asset, group repeated symptoms into issues, support diagnosis, and provide tightly controlled remediation workflows.
+
+WAZABIG does **not** replace those source systems. Zabbix remains the monitoring source, Wazuh the security source, and GLPI the asset/ticket source. WAZABIG acts as the layer that connects them and gives an administrator one place to reason about what is happening.
+
+**AI-SysAdmin** is the local AI/automation layer being built inside that architecture. It first receives deterministic, normalized operational data from WAZABIG; only then can AI-assisted diagnosis, explanation or remediation be added. This separation is intentional: raw alerts are not handed directly to an AI model and unknown conditions are not automatically “fixed”.
+
 This is the first practical AI-SysAdmin building block for WAZABIG.
 
 It converts events from several administrative sources into one small operational model before any AI-assisted diagnosis or remediation is attempted.
