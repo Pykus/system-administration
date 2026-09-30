@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Host monitoring toolbox modal</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0f141b;color:#eef3f8}
+body{margin:0;padding:32px;max-width:960px}
+button,a{font:inherit}
+.toolbar{display:flex;gap:8px;align-items:center}
+.tool-button{border:1px solid #47759d;background:#1d3348;color:#d9efff;border-radius:10px;padding:9px 13px;font-weight:800;cursor:pointer}
+.modal{display:none;position:fixed;inset:0;background:#000a;align-items:center;justify-content:center;padding:18px}
+.modal.open{display:flex}
+.card{width:min(760px,96vw);max-height:86vh;overflow:auto;background:#151b24;border:1px solid #4b5b70;border-radius:16px;padding:18px;box-shadow:0 20px 60px #000b}
+.head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}
+.head h2{margin:0}.muted{color:#9eabba;font-size:.9rem}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tool{background:#10161e;border:1px solid #344255;border-radius:12px;padding:12px;min-width:0}
+.title{display:flex;gap:9px;align-items:center;margin-bottom:8px}
+.dot{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:900;border:1px solid}
+.ok{background:#103f2b;border-color:#30aa6d}.warn{background:#4a351a;border-color:#c88836}.bad{background:#49242a;border-color:#c45f6b}.unknown{background:#27313d;border-color:#637186}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.actions button,.actions a{border:1px solid #415268;background:#1b2531;color:#e9f1fa;border-radius:8px;padding:7px 9px;text-decoration:none;cursor:pointer}
+.actions .repair{border-color:#9a6431;background:#3b2819}
+pre{white-space:pre-wrap;word-break:break-word;background:#0b1016;border:1px solid #2d3948;border-radius:8px;padding:9px;max-height:240px;overflow:auto}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.card{max-height:90vh}}
+</style>
+</head>
+<body>
+<h1>Host details</h1>
+<p class="muted">Keep the main host view focused. Put monitoring-system detail behind one toolbox button.</p>
+<div class="toolbar">
+  <button class="tool-button" id="openToolbox">Monitoring tools</button>
+</div>
+
+<div class="modal" id="toolboxModal" role="dialog" aria-modal="true" aria-labelledby="toolboxTitle">
+  <div class="card">
+    <div class="head">
+      <div><h2 id="toolboxTitle">Monitoring tools</h2><div class="muted" id="toolboxHost"></div></div>
+      <button id="closeToolbox">Close</button>
+    </div>
+    <div class="grid" id="toolboxGrid"></div>
+  </div>
+</div>
+
+<script>
+const demoHost={
+  hostname:"host-01.example.test",
+  tools:{
+    zabbix:{label:"Zabbix",key:"Z",state:"ok",lastSeen:"12 seconds ago",url:"https://monitoring.example.test/host/01",details:{availability:"available",interface:"agent"}},
+    wazuh:{label:"Wazuh",key:"W",state:"ok",lastSeen:"10 seconds ago",url:"https://security.example.test/agents/01",details:{status:"active",version:"4.x"}},
+    glpi:{label:"GLPI",key:"G",state:"warn",lastSeen:"8 minutes ago",url:"https://inventory.example.test/computer/01",details:{inventory:"stale"},repair:async()=>({ok:true,message:"Example repair hook completed"})}
+  }
+};
+
+const modal=document.getElementById("toolboxModal");
+const grid=document.getElementById("toolboxGrid");
+const hostLabel=document.getElementById("toolboxHost");
+let returnFocus=null;
+
+function stateClass(state){
+  return ["ok","warn","bad"].includes(state)?state:"unknown";
+}
+
+function closeToolbox(){
+  modal.classList.remove("open");
+  if(returnFocus) returnFocus.focus();
+}
+
+async function runRepair(tool,button,detailBox){
+  button.disabled=true;
+  const old=button.textContent;
+  button.textContent="Running...";
+  try{
+    const result=await tool.repair();
+    detailBox.hidden=false;
+    detailBox.textContent=JSON.stringify(result,null,2);
+  }catch(error){
+    detailBox.hidden=false;
+    detailBox.textContent=String(error);
+  }finally{
+    button.disabled=false;
+    button.textContent=old;
+  }
+}
+
+function buildToolCard(tool){
+  const card=document.createElement("section");
+  card.className="tool";
+
+  const title=document.createElement("div");
+  title.className="title";
+  const dot=document.createElement("span");
+  dot.className="dot "+stateClass(tool.state);
+  dot.textContent=tool.key;
+  const labels=document.createElement("div");
+  const name=document.createElement("strong");
+  name.textContent=tool.label;
+  const status=document.createElement("div");
+  status.className="muted";
+  status.textContent="State: "+tool.state+" · last seen "+tool.lastSeen;
+  labels.append(name,status);
+  title.append(dot,labels);
+  card.appendChild(title);
+
+  const actions=document.createElement("div");
+  actions.className="actions";
+
+  const detailsButton=document.createElement("button");
+  detailsButton.textContent="Details";
+  actions.appendChild(detailsButton);
+
+  if(tool.url){
+    const sourceLink=document.createElement("a");
+    sourceLink.href=tool.url;
+    sourceLink.target="_blank";
+    sourceLink.rel="noopener";
+    sourceLink.textContent="Open source";
+    actions.appendChild(sourceLink);
+  }
+
+  const detailBox=document.createElement("pre");
+  detailBox.hidden=true;
+  detailsButton.addEventListener("click",()=>{
+    detailBox.hidden=!detailBox.hidden;
+    detailBox.textContent=JSON.stringify(tool.details||{},null,2);
+  });
+
+  if(typeof tool.repair==="function"){
+    const repair=document.createElement("button");
+    repair.className="repair";
+    repair.textContent="Repair";
+    repair.addEventListener("click",()=>runRepair(tool,repair,detailBox));
+    actions.appendChild(repair);
+  }
+
+  card.append(actions,detailBox);
+  return card;
+}
+
+function openToolbox(host,trigger){
+  returnFocus=trigger||document.activeElement;
+  hostLabel.textContent=host.hostname;
+  grid.replaceChildren();
+  for(const tool of Object.values(host.tools)) grid.appendChild(buildToolCard(tool));
+  modal.classList.add("open");
+  document.getElementById("closeToolbox").focus();
+}
+
+document.getElementById("openToolbox").addEventListener("click",event=>openToolbox(demoHost,event.currentTarget));
+document.getElementById("closeToolbox").addEventListener("click",closeToolbox);
+modal.addEventListener("click",event=>{if(event.target===modal)closeToolbox()});
+document.addEventListener("keydown",event=>{if(event.key==="Escape"&&modal.classList.contains("open"))closeToolbox()});
+</script>
+</body>
+</html>
