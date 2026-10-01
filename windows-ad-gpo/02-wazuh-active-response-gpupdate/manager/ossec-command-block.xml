@@ -1,0 +1,21 @@
+<!--
+Optional named-command definitions for /var/ossec/etc/ossec.conf.
+
+If your API call uses:
+  "command": "!gpupdate-computer.cmd"
+the leading ! tells the Wazuh API to treat it as a script name.
+
+Use the blocks below when you also want named commands available to Wazuh
+configuration / rule-triggered Active Response.
+-->
+<ossec_config>
+  <command>
+    <name>gpupdate-computer</name>
+    <executable>gpupdate-computer.cmd</executable>
+  </command>
+
+  <command>
+    <name>gpupdate-computer-reboot</name>
+    <executable>gpupdate-computer-reboot.cmd</executable>
+  </command>
+</ossec_config>
