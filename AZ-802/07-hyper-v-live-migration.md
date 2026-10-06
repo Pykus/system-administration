@@ -1,128 +1,116 @@
-# 07 — Hyper-V Live Migration: Kerberos, delegation, networks and troubleshooting
+# 07 — Hyper-V Live Migration: Kerberos, delegation, networks, and troubleshooting
 
-Hyper-V Live Migration przenosi uruchomioną maszynę wirtualną z jednego hosta Hyper-V na drugi z minimalną przerwą widoczną dla systemu gościa. Funkcja przydaje się przy aktualizacjach hostów, wymianie sprzętu, równoważeniu obciążenia oraz planowanych pracach serwisowych.
+Hyper-V Live Migration moves a running virtual machine from one Hyper-V host to another with little or no visible interruption to the guest workload. It is useful during host maintenance, hardware replacement, workload balancing, and planned infrastructure changes.
 
-Najczęściej nie psuje się samo polecenie Move-VM. Problemy zwykle wynikają z czterech obszarów:
+The difficult part is rarely the Move-VM command itself. Most real failures come from four areas:
 
-1. uwierzytelnianie i delegowanie,
-2. DNS, routing i łączność,
-3. niezgodność hostów lub przełączników wirtualnych,
-4. błędne założenia dotyczące magazynu i wydajności.
+1. authentication and delegation,
+2. DNS, routing, and connectivity,
+3. incompatible host or virtual-switch configuration,
+4. incorrect storage or performance assumptions.
 
-Ten materiał pokazuje nie tylko jak wykonać migrację, ale przede wszystkim jak rozumieć jej zależności i diagnozować awarie.
+This chapter focuses on operational reasoning and troubleshooting rather than only on GUI steps.
 
-## 1. Kiedy Live Migration ma sens
+## 1. When Live Migration is useful
 
-Typowe zastosowania:
+Typical use cases include:
 
-- restart lub aktualizacja hosta bez długiego wyłączenia maszyny wirtualnej,
-- przeniesienie obciążenia ze starszego lub przeciążonego hosta,
-- wymiana sprzętu,
-- rozłożenie CPU i pamięci między hostami,
-- planowane prace w klastrze,
-- test procedur migracyjnych i utrzymaniowych.
+- patching or rebooting a Hyper-V host without a long VM outage,
+- moving workloads away from failing or overloaded hardware,
+- replacing an older Hyper-V host,
+- redistributing CPU and memory load,
+- performing planned maintenance,
+- testing workload mobility procedures.
 
-Live Migration nie zastępuje:
+Live Migration is not a substitute for backup, Hyper-V Replica, failover clustering, application-level high availability, or disaster recovery.
 
-- kopii zapasowej,
-- replikacji do innej lokalizacji,
-- klastra wysokiej dostępności,
-- planu disaster recovery.
+A VM that can move between two hosts is still vulnerable if both hosts depend on the same failed storage, switch, rack, or power source.
 
-Jeżeli oba hosty korzystają z tego samego uszkodzonego storage albo tej samej awarii zasilania, możliwość migracji VM nie rozwiąże problemu.
+## 2. What actually moves
 
-## 2. Co faktycznie jest przenoszone
+A VM is more than a VHDX file. Hyper-V must coordinate:
 
-Maszyna wirtualna to nie tylko plik VHDX. Migracja musi skoordynować:
+- VM configuration,
+- virtual CPU state,
+- memory pages,
+- virtual devices,
+- network identity,
+- storage state when storage migration is included.
 
-- konfigurację VM,
-- stan procesora wirtualnego,
-- strony pamięci RAM,
-- urządzenia wirtualne,
-- konfigurację sieciową,
-- dyski, jeżeli migracja obejmuje również storage.
-
-Uproszczony przebieg:
+Simplified flow:
 
 ~~~text
 source host
    |
-   | kopiowanie pamięci
+   | copy active memory pages
    v
 destination host
    |
-   | ponowne kopiowanie zmienionych stron
+   | recopy pages changed during transfer
    v
-krótka finalna synchronizacja
+short final synchronization
    |
    v
-VM kontynuuje pracę na hoście docelowym
+VM continues on destination
 ~~~
 
-Im szybciej VM modyfikuje pamięć, tym trudniej zakończyć kopiowanie w kilku przebiegach.
+A VM that modifies memory rapidly may require several memory-copy passes before final cutover.
 
-## 3. Trzy pytania przed migracją
+## 3. Three questions before troubleshooting
 
-Zanim zmienisz konfigurację, rozdziel problem.
+Separate the problem into three layers.
 
-### Czy hosty się widzą?
+### Can the hosts communicate?
 
-Sprawdź:
+Check:
 
-- DNS,
+- DNS resolution,
 - routing,
-- zapory,
-- WinRM tam, gdzie jest używany,
-- nazwy hostów,
-- sieć migracyjną.
+- firewall rules,
+- WinRM where required,
+- intended migration network.
 
-### Czy host źródłowy może uwierzytelnić się do docelowego?
+### Can authentication be delegated?
 
-Tu pojawiają się:
+This is where CredSSP, Kerberos, SPNs, and constrained delegation matter.
 
-- CredSSP,
-- Kerberos,
-- SPN,
-- constrained delegation.
+### Can the destination host run the VM?
 
-### Czy host docelowy może uruchomić tę VM?
+Check:
 
-Sprawdź:
+- CPU compatibility,
+- available memory,
+- virtual switch names,
+- storage availability,
+- required VM features.
 
-- CPU,
-- pamięć,
-- przełączniki Hyper-V,
-- storage,
-- funkcje zabezpieczeń,
-- urządzenia wymagane przez VM.
+A perfect Kerberos configuration does not help if the destination host has no compatible virtual switch.
 
-Doskonały Kerberos nie pomoże, jeśli host docelowy nie ma właściwego vSwitcha.
+## 4. Enable and inspect Live Migration
 
-## 4. Włączenie i inspekcja Live Migration
-
-Włączenie:
+Enable migration:
 
 ~~~powershell
 Enable-VMMigration
 ~~~
 
-Sprawdzenie konfiguracji:
+Inspect host configuration:
 
 ~~~powershell
-Get-VMHost | Select-Object VirtualMachineMigrationEnabled, VirtualMachineMigrationAuthenticationType, VirtualMachineMigrationPerformanceOption, MaximumVirtualMachineMigrations, UseAnyNetworkForMigration
+Get-VMHost | Select-Object VirtualMachineMigrationEnabled,VirtualMachineMigrationAuthenticationType,VirtualMachineMigrationPerformanceOption,MaximumVirtualMachineMigrations,UseAnyNetworkForMigration
 ~~~
 
-Host zdalny:
+Inspect another host:
 
 ~~~powershell
 Get-VMHost -ComputerName HV02
 ~~~
 
-Nie zakładaj, że oba hosty mają takie same ustawienia.
+Never assume that both hosts use the same migration settings.
 
-## 5. CredSSP a Kerberos
+## 5. CredSSP versus Kerberos
 
-Hyper-V obsługuje oba mechanizmy.
+Hyper-V supports both authentication methods.
 
 Kerberos:
 
@@ -136,205 +124,195 @@ CredSSP:
 Set-VMHost -VirtualMachineMigrationAuthenticationType CredSSP
 ~~~
 
-CredSSP jest prosty, gdy administrator pracuje bezpośrednio na hoście źródłowym.
+CredSSP is convenient when an administrator starts migration directly on the source host.
 
-Problem pojawia się przy scenariuszu:
+Remote administration introduces the classic second-hop problem:
 
 ~~~text
-stacja administratora
-       |
-       v
+administrator workstation
+        |
+        v
       HV01
-       |
-       v
+        |
+        v
       HV02
 ~~~
 
-Jeżeli migracja działa uruchomiona lokalnie na HV01, ale nie działa z komputera administratora, bardzo mocno wskazuje to na problem delegowania poświadczeń.
+If migration succeeds on HV01 but fails when initiated from a management workstation, delegation becomes a strong suspect.
 
-## 6. Kerberos dla zdalnego zarządzania
+## 6. Kerberos for remote administration
 
-Dla hostów domenowych i zdalnego uruchamiania migracji Kerberos jest zwykle właściwszym rozwiązaniem.
+For domain-joined Hyper-V hosts and remote management, Kerberos is usually the better operational design.
 
-Przykład:
+Configure both hosts:
 
 ~~~powershell
 Set-VMHost -ComputerName HV01 -VirtualMachineMigrationAuthenticationType Kerberos
 Set-VMHost -ComputerName HV02 -VirtualMachineMigrationAuthenticationType Kerberos
 ~~~
 
-Samo ustawienie Kerberos nie wystarcza.
+Kerberos alone is not enough.
 
-Konto komputera hosta źródłowego musi mieć prawo delegowania do odpowiednich usług hosta docelowego.
+The source host computer account must be permitted to delegate authentication to the required services on the destination host.
 
 ## 7. Constrained delegation
 
-Najważniejsza usługa dla migracji VM:
+The important service for Live Migration is:
 
 ~~~text
 Microsoft Virtual System Migration Service
 ~~~
 
-Dla migracji storage może być wymagane także:
+For storage migration, CIFS may also be required:
 
 ~~~text
 cifs
 ~~~
 
-Typowa konfiguracja w Active Directory Users and Computers:
+Typical Active Directory procedure:
 
-1. Otwórz konto komputera HV01.
-2. Properties -> Delegation.
-3. Wybierz delegowanie tylko do określonych usług.
-4. Dodaj konto komputera HV02.
-5. Dodaj Microsoft Virtual System Migration Service.
-6. Dodaj cifs, jeśli potrzebna jest migracja storage.
-7. Powtórz odwrotnie, jeśli migracja ma działać także HV02 -> HV01.
+1. Open Active Directory Users and Computers.
+2. Open the computer account of the source Hyper-V host.
+3. Open Properties.
+4. Open Delegation.
+5. Select delegation to specified services only.
+6. Add the destination Hyper-V host.
+7. Add Microsoft Virtual System Migration Service.
+8. Add cifs if storage migration requires it.
+9. Repeat in the reverse direction if migration must work both ways.
 
-Delegowanie jest kierunkowe.
+Delegation is directional.
 
-Przykład:
+Example:
 
 ~~~text
-HV01 może delegować do:
+HV01 may delegate to:
   Microsoft Virtual System Migration Service / HV02
   cifs / HV02
 
-HV02 może delegować do:
+HV02 may delegate to:
   Microsoft Virtual System Migration Service / HV01
   cifs / HV01
 ~~~
 
-Nie stosuj unconstrained delegation, jeśli wystarcza ograniczone delegowanie.
+Avoid unconstrained delegation when constrained delegation is sufficient.
 
-## 8. SPN i Kerberos
+## 8. Service Principal Names
 
-Lista SPN hosta:
+Inspect SPNs:
 
 ~~~powershell
 setspn -L HV01
 setspn -L HV02
 ~~~
 
-Sprawdzenie konkretnego SPN:
+Query before creating anything:
 
 ~~~powershell
 setspn -Q "Microsoft Virtual System Migration Service/HV02.contoso.test"
 ~~~
 
-Jeżeli diagnostyka potwierdza brak wpisu:
+If troubleshooting confirms a missing registration:
 
 ~~~powershell
 setspn -S "Microsoft Virtual System Migration Service/HV02.contoso.test" HV02
 ~~~
 
-Nie dodawaj SPN w ciemno.
+Do not add SPNs blindly. Duplicate SPNs can break Kerberos.
 
-Duplikat SPN może sam w sobie złamać Kerberos.
+## 9. Stale Kerberos tickets
 
-## 9. Stare bilety Kerberos
+After changing delegation or SPNs, cached tickets can preserve the old state.
 
-Po zmianie delegowania lub SPN stary ticket może nadal zachowywać poprzedni stan.
-
-Dla bieżącej sesji:
+Current user session:
 
 ~~~powershell
 klist purge
 ~~~
 
-Dla Local System Microsoft w diagnostyce Hyper-V wskazuje:
+Local System session:
 
 ~~~powershell
 klist purge -li 0x3e7
 ~~~
 
-Czyszczenie ticketów to krok diagnostyczny, a nie trwałe rozwiązanie.
+Ticket purging is a troubleshooting step, not a permanent fix.
 
-## 10. Windows Server 2025 i Credential Guard
+## 10. Windows Server 2025 and Credential Guard
 
-W Windows Server 2025 trzeba brać pod uwagę Credential Guard.
+Microsoft documents that Credential Guard can affect CredSSP-based Hyper-V Live Migration on Windows Server 2025.
 
-Microsoft dokumentuje problemy z migracją Hyper-V opartą na CredSSP, gdy Credential Guard jest aktywny. To szczególnie istotne przy aktualizacji z Windows Server 2022 do 2025.
-
-Sprawdź wersję systemu:
+Verify the operating system:
 
 ~~~powershell
-Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber
+Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber
 ~~~
 
-Sprawdź Device Guard:
+Inspect Device Guard state:
 
 ~~~powershell
 Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard
 ~~~
 
-Nie diagnozuj Windows Server 2025 dokładnie tak samo jak starszego hosta.
+Do not troubleshoot a Windows Server 2025 host exactly like an older Windows Server 2019 or 2022 host.
 
-## 11. Sieć Live Migration
+## 11. Migration network design
 
-Migracja może zużyć znaczną część przepustowości.
+Live Migration can consume significant bandwidth and compete with:
 
-Potencjalnie konkuruje z:
+- guest traffic,
+- storage traffic,
+- backup traffic,
+- management traffic.
 
-- ruchem VM,
-- storage,
-- backupem,
-- zarządzaniem.
-
-Przykładowe logiczne rozdzielenie:
+A production design may separate traffic logically:
 
 ~~~text
-Management network     -> administracja
-VM network             -> ruch systemów gości
+Management network     -> administration
+VM network             -> guest traffic
 Storage network        -> storage
-Live Migration network -> transfer pamięci/stanu
+Live Migration network -> memory/state transfer
 ~~~
 
-W małym laboratorium jedna sieć może wystarczyć. W produkcji warto świadomie kontrolować ścieżkę migracji.
-
-Adaptery:
+Inspect adapters:
 
 ~~~powershell
-Get-NetAdapter | Sort-Object Name | Format-Table Name, Status, LinkSpeed, MacAddress
+Get-NetAdapter | Sort-Object Name | Format-Table Name,Status,LinkSpeed,MacAddress
 ~~~
 
-Routing:
+Inspect routing:
 
 ~~~powershell
 Get-NetRoute -AddressFamily IPv4 | Sort-Object RouteMetric
 ~~~
 
-## 12. Czy używać dowolnej sieci
+## 12. Migration network selection
 
-Sprawdź:
+Inspect:
 
 ~~~powershell
 Get-VMHost | Select-Object UseAnyNetworkForMigration
 ~~~
 
-Przykład ustawienia:
+Hyper-V exposes:
 
 ~~~powershell
 Set-VMHost -UseAnyNetworkForMigration $true
 ~~~
 
-W produkcji wygodniejsze nie zawsze znaczy lepsze. Lepiej świadomie ustalić, którędy ma iść ruch migracyjny.
+In production, convenience should not replace deliberate traffic design.
 
-## 13. Tryby wydajności migracji
+## 13. Migration performance options
 
-Hyper-V obsługuje między innymi:
+Hyper-V supports TCP/IP, Compression, and SMB migration modes.
 
-- TCP/IP,
-- Compression,
-- SMB.
-
-Przykład:
+Example:
 
 ~~~powershell
 Set-VMHost -VirtualMachineMigrationPerformanceOption Compression
 ~~~
 
-Sprawdzenie:
+Verify:
 
 ~~~powershell
 Get-VMHost | Select-Object VirtualMachineMigrationPerformanceOption
@@ -342,120 +320,118 @@ Get-VMHost | Select-Object VirtualMachineMigrationPerformanceOption
 
 ### Compression
 
-Dobre, gdy:
+Useful when CPU capacity is available but bandwidth is limited.
 
-- CPU ma zapas,
-- sieć jest ograniczeniem.
+Trade-off:
 
-Koszt: więcej pracy procesora.
+- lower network usage,
+- higher CPU usage.
 
 ### SMB
 
-Może wykorzystać wysokowydajne mechanizmy SMB, w tym środowiska z SMB Multichannel lub RDMA.
+Useful in high-throughput SMB environments and can benefit from SMB Multichannel, RDMA, and SMB Direct.
 
-Nie wybieraj SMB tylko dlatego, że nazwa brzmi szybciej. Infrastruktura musi być do tego przygotowana.
+Do not choose SMB only because it sounds faster. The network must support the design.
 
 ### TCP/IP
 
-Najprostszy punkt wyjścia bez rozbudowanej infrastruktury SMB/RDMA.
+A straightforward baseline where advanced SMB/RDMA infrastructure is not present.
 
-## 14. Kompatybilność CPU
+## 14. CPU compatibility
 
-Migracja może się nie udać, jeżeli VM korzysta z funkcji CPU niedostępnych na hoście docelowym.
-
-Sprawdzenie:
+Inspect:
 
 ~~~powershell
 Get-VMProcessor -VMName APP01 | Select-Object CompatibilityForMigrationEnabled
 ~~~
 
-Włączenie trybu zgodności:
+Enable compatibility only where justified:
 
 ~~~powershell
 Set-VMProcessor -VMName APP01 -CompatibilityForMigrationEnabled $true
 ~~~
 
-Nie włączaj tego automatycznie dla wszystkich VM. Tryb zgodności może ukrywać nowsze funkcje procesora przed gościem.
+Compatibility mode can hide newer CPU features from the guest, so do not enable it automatically on every VM.
 
-## 15. Virtual switch
+## 15. Virtual switch compatibility
 
-Bardzo częsty problem: inna nazwa przełącznika na hoście docelowym.
-
-Porównanie:
+Compare both hosts:
 
 ~~~powershell
-Get-VMSwitch -ComputerName HV01 | Select-Object Name, SwitchType
-Get-VMSwitch -ComputerName HV02 | Select-Object Name, SwitchType
+Get-VMSwitch -ComputerName HV01 | Select-Object Name,SwitchType
+Get-VMSwitch -ComputerName HV02 | Select-Object Name,SwitchType
 ~~~
 
-Sieć VM:
+Inspect the VM network adapter:
 
 ~~~powershell
-Get-VMNetworkAdapter -VMName APP01 -ComputerName HV01 | Select-Object Name, SwitchName, MacAddress
+Get-VMNetworkAdapter -VMName APP01 -ComputerName HV01 | Select-Object Name,SwitchName,MacAddress
 ~~~
 
-Jeżeli VM używa Production, a drugi host ma Prod-Network, Hyper-V nie musi traktować ich jako odpowiedników.
+A source switch named Production and a destination switch named Prod-Network are not automatically equivalent.
 
-## 16. Pamięć na hoście docelowym
+## 16. Destination memory capacity
 
-VM:
+Inspect the VM:
 
 ~~~powershell
-Get-VM -ComputerName HV01 -Name APP01 | Select-Object Name, State, MemoryAssigned
+Get-VM -ComputerName HV01 -Name APP01 | Select-Object Name,State,MemoryAssigned
 ~~~
 
-Dostępna pamięć:
+Destination free memory:
 
 ~~~powershell
 Get-Counter -ComputerName HV02 '\Memory\Available MBytes'
 ~~~
 
-Inne VM:
+Other VM demand:
 
 ~~~powershell
-Get-VM -ComputerName HV02 | Select-Object Name, State, MemoryAssigned, MemoryDemand
+Get-VM -ComputerName HV02 | Select-Object Name,State,MemoryAssigned,MemoryDemand
 ~~~
 
-Nie patrz tylko na fizycznie zainstalowany RAM.
+Installed RAM alone is not enough. Available capacity and current workload matter.
 
-## 17. Podstawowa migracja
+## 17. Basic migration
+
+Local migration:
 
 ~~~powershell
 Move-VM -Name APP01 -DestinationHost HV02
 ~~~
 
-Z komputera administracyjnego:
+Remote initiation:
 
 ~~~powershell
 Move-VM -ComputerName HV01 -Name APP01 -DestinationHost HV02
 ~~~
 
-Różnica między powodzeniem lokalnym i błędem zdalnym jest bardzo cenną wskazówką diagnostyczną.
+If the first works and the second fails, that difference is valuable diagnostic evidence.
 
-## 18. Migracja razem ze storage
+## 18. Moving storage too
 
 ~~~powershell
 Move-VM -Name APP01 -DestinationHost HV02 -IncludeStorage -DestinationStoragePath "D:\VMs\APP01"
 ~~~
 
-Sprawdzenie przestrzeni:
+Check destination capacity:
 
 ~~~powershell
-Get-Volume -CimSession HV02 | Select-Object DriveLetter, FileSystemLabel, SizeRemaining, Size
+Get-Volume -CimSession HV02 | Select-Object DriveLetter,FileSystemLabel,SizeRemaining,Size
 ~~~
 
-Dochodzi wtedy więcej zależności:
+Storage migration adds dependencies:
 
+- permissions,
 - CIFS,
-- delegowanie,
-- prawa,
-- miejsce na dysku,
-- przepustowość,
-- ścieżki.
+- delegation,
+- disk space,
+- throughput,
+- destination paths.
 
-## 19. Preflight przed migracją
+## 19. Read-only preflight
 
-Przykładowy read-only check:
+A small preflight can catch common errors before migration begins.
 
 ~~~powershell
 param(
@@ -475,11 +451,11 @@ Resolve-DnsName $DestinationHost -ErrorAction Stop
 $source = Get-VMHost -ComputerName $SourceHost
 $destination = Get-VMHost -ComputerName $DestinationHost
 
-$source | Select-Object ComputerName, VirtualMachineMigrationEnabled, VirtualMachineMigrationAuthenticationType, VirtualMachineMigrationPerformanceOption
-$destination | Select-Object ComputerName, VirtualMachineMigrationEnabled, VirtualMachineMigrationAuthenticationType, VirtualMachineMigrationPerformanceOption
+$source | Select-Object ComputerName,VirtualMachineMigrationEnabled,VirtualMachineMigrationAuthenticationType,VirtualMachineMigrationPerformanceOption
+$destination | Select-Object ComputerName,VirtualMachineMigrationEnabled,VirtualMachineMigrationAuthenticationType,VirtualMachineMigrationPerformanceOption
 
 $vm = Get-VM -ComputerName $SourceHost -Name $VMName -ErrorAction Stop
-$vm | Select-Object Name, State, MemoryAssigned, ProcessorCount
+$vm | Select-Object Name,State,MemoryAssigned,ProcessorCount
 
 $vmNics = Get-VMNetworkAdapter -ComputerName $SourceHost -VMName $VMName
 $destinationSwitches = Get-VMSwitch -ComputerName $DestinationHost
@@ -494,36 +470,35 @@ if ($missingSwitches) {
     Write-Warning ("Missing destination switches: " + ($missingSwitches -join ", "))
 }
 
-Get-VMProcessor -ComputerName $SourceHost -VMName $VMName |
-    Select-Object CompatibilityForMigrationEnabled
+Get-VMProcessor -ComputerName $SourceHost -VMName $VMName | Select-Object CompatibilityForMigrationEnabled
 ~~~
 
-Taki skrypt nie gwarantuje sukcesu, ale szybko wyłapuje kilka najczęstszych niespójności.
+This does not guarantee success, but it catches several common mismatches early.
 
-## 20. Diagnostyka według klasy błędu
+## 20. Troubleshooting by error class
 
-### Access denied / Kerberos
+### Access denied or Kerberos errors
 
-Objawy:
+Typical symptoms:
 
 - 0x80070005,
-- błędy Kerberos,
-- działa lokalnie, nie działa zdalnie.
+- Kerberos failures,
+- works locally but not remotely.
 
-Sprawdź:
+Check:
 
 ~~~powershell
 Get-VMHost -ComputerName HV01 | Select-Object VirtualMachineMigrationAuthenticationType
 ~~~
 
-Następnie:
+Then inspect:
 
-- delegation,
-- SPN,
-- tickets,
-- DNS.
+- constrained delegation,
+- SPNs,
+- ticket cache,
+- DNS identity.
 
-### Brak połączenia z hostem
+### Destination cannot be contacted
 
 ~~~powershell
 Resolve-DnsName HV02
@@ -531,45 +506,44 @@ Test-NetConnection HV02
 Test-WSMan HV02
 ~~~
 
-Nie poprawiaj Kerberos, jeśli DNS nie działa.
+Do not change Kerberos if DNS is broken.
 
-### Błąd sieci VM
+### VM network configuration failure
 
 ~~~powershell
 Get-VMNetworkAdapter -ComputerName HV01 -VMName APP01
 Get-VMSwitch -ComputerName HV02
 ~~~
 
-### Błąd CPU
+### CPU compatibility failure
 
 ~~~powershell
 Get-VMProcessor -ComputerName HV01 -VMName APP01
 ~~~
 
-### Błąd storage
+### Storage failure
 
 ~~~powershell
 Get-VMHardDiskDrive -ComputerName HV01 -VMName APP01
 ~~~
 
-Potem sprawdź miejsce, ścieżki, uprawnienia i CIFS.
+Then verify path, free space, permissions, and CIFS delegation where applicable.
 
-## 21. Logi Hyper-V
+## 21. Hyper-V event logs
 
-Lista logów:
-
-~~~powershell
-Get-WinEvent -ListLog "*Hyper-V*" | Select-Object LogName, RecordCount
-~~~
-
-Ostatnie zdarzenia VMMS:
+List Hyper-V logs:
 
 ~~~powershell
-Get-WinEvent -LogName "Microsoft-Windows-Hyper-V-VMMS-Admin" -MaxEvents 50 |
-    Select-Object TimeCreated, Id, LevelDisplayName, Message
+Get-WinEvent -ListLog "*Hyper-V*" | Select-Object LogName,RecordCount
 ~~~
 
-Tylko ostatnie 15 minut:
+Recent VMMS events:
+
+~~~powershell
+Get-WinEvent -LogName "Microsoft-Windows-Hyper-V-VMMS-Admin" -MaxEvents 50 | Select-Object TimeCreated,Id,LevelDisplayName,Message
+~~~
+
+Time-bounded query:
 
 ~~~powershell
 $since = (Get-Date).AddMinutes(-15)
@@ -577,166 +551,166 @@ $since = (Get-Date).AddMinutes(-15)
 Get-WinEvent -FilterHashtable @{
     LogName = "Microsoft-Windows-Hyper-V-VMMS-Admin"
     StartTime = $since
-} | Select-Object TimeCreated, Id, Message
+} | Select-Object TimeCreated,Id,Message
 ~~~
 
-Ograniczenie czasu jest ważne, bo log może zawierać tysiące starych zdarzeń.
+Use the migration time to reduce noise.
 
-## 22. Kolejność diagnostyki
+## 22. Deterministic troubleshooting workflow
 
-Dobra procedura:
+Use this order:
 
-1. sprawdź stan VM,
-2. sprawdź DNS obu hostów,
-3. porównaj ustawienia migracji,
-4. ustal, czy migracja jest lokalna czy zdalna,
-5. sprawdź Kerberos/delegation/SPN,
-6. porównaj vSwitch,
-7. sprawdź CPU,
-8. sprawdź pamięć,
-9. sprawdź storage,
-10. sprawdź VMMS logs,
-11. zmieniaj jedną rzecz naraz.
+1. verify source VM state,
+2. verify DNS for both hosts,
+3. compare Live Migration settings,
+4. determine whether migration is local or remotely initiated,
+5. check delegation and SPNs,
+6. compare virtual switch names,
+7. check CPU compatibility,
+8. check destination memory,
+9. check storage,
+10. read VMMS logs,
+11. change one variable,
+12. retest.
 
-Nie zmieniaj jednocześnie firewalla, Kerberosa, switcha i CPU compatibility. Możesz wtedy uzyskać sukces, ale nie dowiesz się, co było przyczyną.
+Do not change authentication, firewall, switches, storage, and CPU settings simultaneously.
 
-## 23. Scenariusz: lokalnie działa, zdalnie nie
+## 23. Scenario: local migration works, remote migration fails
+
+Topology:
 
 ~~~text
 ADM01 -> HV01 -> HV02
 ~~~
 
-Move-VM uruchomione na HV01 działa.
+Move-VM succeeds directly on HV01 but fails from ADM01.
 
-To samo uruchomione na ADM01 kończy się access denied.
+Strong hypothesis:
 
-Najbardziej prawdopodobna grupa problemów:
+- host connectivity likely works,
+- VM compatibility likely works,
+- credential delegation is the leading suspect.
 
-~~~text
-Kerberos
-delegation
-SPN
-~~~
+Investigate Kerberos, constrained delegation, SPNs, and cached tickets before opening random firewall ports.
 
-To znacznie lepszy punkt startu niż otwieranie przypadkowych portów.
+## 24. Scenario: authentication succeeds but preparation fails
 
-## 24. Scenariusz: host docelowy osiągalny, ale VM nie startuje po przygotowaniu
-
-Najpierw porównaj sieci:
+Compare switch names:
 
 ~~~powershell
 Get-VMNetworkAdapter -ComputerName HV01 -VMName APP01 | Select-Object SwitchName
 Get-VMSwitch -ComputerName HV02 | Select-Object Name
 ~~~
 
-Brak zgodnego switcha to częsty, prosty błąd.
+If the source VM expects LAN-Production and the destination only has Production-LAN, fix the configuration intentionally.
 
-## 25. Scenariusz: migracja trwa bardzo długo
+## 25. Scenario: migration is very slow
 
-Sprawdź:
+Inspect transport mode:
 
 ~~~powershell
 Get-VMHost | Select-Object VirtualMachineMigrationPerformanceOption
 ~~~
 
-Następnie:
+Then inspect:
 
-- prędkość NIC,
-- obciążenie sieci backupem,
-- CPU przy Compression,
-- SMB/RDMA przy SMB,
-- intensywność zmian pamięci VM.
+- migration NIC speed,
+- backup traffic,
+- CPU usage with Compression,
+- SMB/RDMA capabilities with SMB,
+- VM memory write rate.
 
-Duża VM nie zawsze migruje wolniej niż mniejsza. VM intensywnie zapisująca RAM może być trudniejsza do przeniesienia.
+A VM that constantly changes memory can be harder to migrate than an idle VM with the same RAM size.
 
-## 26. Błędy bezpieczeństwa
+## 26. Security mistakes to avoid
 
-Nie rób:
+Do not:
 
-- unconstrained delegation bez potrzeby,
-- ręcznego dodawania SPN bez wyszukania duplikatów,
-- wyłączania nowoczesnych zabezpieczeń bez analizy,
-- Live Migration przez niezaufaną sieć,
-- publikowania realnych hostów i topologii w publicznym repo.
+- enable unconstrained delegation unnecessarily,
+- create SPNs without checking for duplicates,
+- disable modern security features only to preserve an outdated design,
+- send migration traffic over an untrusted network,
+- publish real production host names or network details.
 
-## 27. Jak rozumować na AZ-802
+Use least privilege and synthetic examples.
 
-Model:
+## 27. AZ-802 reasoning model
+
+Use this mental model:
 
 ~~~text
-Czy hosty się komunikują?
+Can the hosts communicate?
         |
         v
-Czy uwierzytelnienie i delegacja działają?
+Can authentication delegate correctly?
         |
         v
-Czy host docelowy jest zgodny z VM?
+Can the destination run the VM?
         |
         v
-Czy storage i sieć są dostępne?
+Can storage and network state move?
         |
         v
-Czy transport migracji jest właściwy?
+Is the selected transport appropriate?
 ~~~
 
-Typowe podpowiedzi w zadaniach:
+Typical clues:
 
-- działa lokalnie, nie działa zdalnie -> delegation/Kerberos,
-- brak sieci po migracji -> vSwitch,
-- różne generacje CPU -> processor compatibility,
-- przenoszony też storage -> CIFS/storage path,
-- bardzo wolna migracja -> transport i bandwidth.
+- works locally, fails remotely -> Kerberos/delegation,
+- destination network unavailable -> virtual switch configuration,
+- different CPU generations -> processor compatibility,
+- VM files must move too -> storage/CIFS/delegation,
+- transfer is slow -> transport and bandwidth.
 
-## 28. Weryfikacja po migracji
+## 28. Verification after migration
 
-Stan VM:
+Verify VM location and state:
 
 ~~~powershell
-Get-VM -ComputerName HV02 -Name APP01 | Select-Object Name, State, Status
+Get-VM -ComputerName HV02 -Name APP01 | Select-Object Name,State,Status
 ~~~
 
-Sieć:
+Verify networking:
 
 ~~~powershell
-Get-VMNetworkAdapter -ComputerName HV02 -VMName APP01 |
-    Select-Object SwitchName, MacAddress, Status
+Get-VMNetworkAdapter -ComputerName HV02 -VMName APP01 | Select-Object SwitchName,MacAddress,Status
 ~~~
 
-Dyski:
+Verify disks:
 
 ~~~powershell
 Get-VMHardDiskDrive -ComputerName HV02 -VMName APP01 | Select-Object Path
 ~~~
 
-Test aplikacji:
+Verify application health where possible:
 
 ~~~powershell
 Test-NetConnection app01.contoso.test -Port 443
 ~~~
 
-Sukces migracji infrastruktury nie jest równoznaczny ze zdrowiem aplikacji.
+Infrastructure migration success and application health are not the same thing.
 
-## 29. Rollback
+## 29. Rollback thinking
 
-Przed migracją zapisz:
+Before maintenance, record:
 
 ~~~text
 source host
 destination host
 VM name
-storage paths
-switch names
+original storage paths
+original switch names
 authentication mode
-CPU compatibility state
+processor compatibility state
 application health check
-rollback host
+rollback destination
 ~~~
 
-To szczególnie ważne, gdy razem z VM przenosisz storage albo zmieniasz konfigurację.
+A reverse Move-VM may be simple, but storage relocation and configuration changes can make rollback more complex.
 
-## 30. Laboratorium
+## 30. Practical lab
 
-Hosty:
+Use synthetic hosts:
 
 ~~~text
 HV01.contoso.test
@@ -744,60 +718,60 @@ HV02.contoso.test
 LAB-VM01
 ~~~
 
-Zadanie:
+Tasks:
 
-1. włącz Live Migration,
-2. porównaj tryby uwierzytelniania,
-3. ustaw Kerberos,
-4. skonfiguruj constrained delegation w obie strony,
-5. sprawdź SPN,
-6. porównaj vSwitch,
-7. uruchom preflight,
-8. przenieś LAB-VM01 na HV02,
-9. sprawdź sieć VM,
-10. przenieś VM z powrotem,
-11. celowo zepsuj bezpieczny element labu, np. nazwę testowego switcha,
-12. przeanalizuj błąd,
-13. napraw,
-14. ponownie potwierdź migrację.
+1. enable Live Migration on both hosts,
+2. compare authentication settings,
+3. configure Kerberos,
+4. configure constrained delegation in both directions,
+5. verify migration-service SPNs,
+6. compare virtual switches,
+7. run the preflight,
+8. migrate LAB-VM01 from HV01 to HV02,
+9. verify guest connectivity,
+10. migrate it back,
+11. intentionally break a harmless test condition such as a test switch name,
+12. observe the error,
+13. restore the setting,
+14. verify migration again.
 
-Kontrolowane zepsucie środowiska uczy więcej niż jednorazowy sukces.
+Controlled failure and repair teaches more than a single successful migration.
 
 ## 31. Final checklist
 
-Przed:
+Before migration:
 
-- [ ] DNS działa,
-- [ ] hosty są osiągalne,
-- [ ] Live Migration jest włączone,
-- [ ] tryb uwierzytelniania jest świadomie wybrany,
-- [ ] delegation jest poprawne,
-- [ ] SPN są poprawne,
-- [ ] sieć migracyjna jest właściwa,
-- [ ] vSwitch pasują,
-- [ ] pamięć jest dostępna,
-- [ ] CPU compatibility jest rozważone,
-- [ ] storage jest dostępny.
+- [ ] DNS works for both hosts,
+- [ ] both hosts are reachable,
+- [ ] Live Migration is enabled,
+- [ ] authentication mode is intentional,
+- [ ] constrained delegation is correct,
+- [ ] SPNs are valid,
+- [ ] migration network is suitable,
+- [ ] destination switch configuration matches,
+- [ ] destination has enough memory,
+- [ ] CPU compatibility is considered,
+- [ ] storage paths and permissions are valid.
 
-Po:
+After migration:
 
-- [ ] VM działa na hoście docelowym,
-- [ ] sieć VM działa,
-- [ ] dyski są we właściwej lokalizacji,
-- [ ] aplikacja odpowiada,
-- [ ] logi nie pokazują nierozwiązanych błędów.
+- [ ] VM runs on destination,
+- [ ] guest networking works,
+- [ ] disks are in expected locations,
+- [ ] application health check passes,
+- [ ] event logs contain no unresolved migration errors.
 
-## 32. Dokumentacja Microsoft
+## 32. Microsoft documentation
 
 Hyper-V Live Migration troubleshooting:
 
 https://learn.microsoft.com/en-us/troubleshoot/windows-server/virtualization/hyper-v-virtual-machine-live-migration
 
-Constrained delegation and Live Migration troubleshooting:
+Constrained delegation and migration troubleshooting:
 
 https://learn.microsoft.com/en-us/troubleshoot/windows-server/virtualization/troubleshoot-live-migration-issues
 
-Set-VMHost:
+Set-VMHost reference:
 
 https://learn.microsoft.com/powershell/module/hyper-v/set-vmhost
 
@@ -805,22 +779,22 @@ Credential Guard considerations:
 
 https://learn.microsoft.com/windows/security/identity-protection/credential-guard/considerations-known-issues
 
-## Podsumowanie
+## Summary
 
-Live Migration to nie jeden przełącznik. To współdziałanie:
+Reliable Live Migration is the intersection of:
 
 ~~~text
-Hyper-V
+Hyper-V configuration
 + DNS
 + Kerberos
-+ delegation
-+ SPN
-+ sieć
-+ vSwitch
-+ CPU
-+ pamięć
++ constrained delegation
++ SPNs
++ networking
++ virtual switches
++ CPU compatibility
++ memory
 + storage
-+ weryfikacja
++ verification
 ~~~
 
-Najbardziej wartościowa umiejętność administracyjna to diagnozowanie tych warstw osobno zamiast traktowania każdej awarii jako ogólnego błędu Hyper-V.
+The key administrative skill is to diagnose those layers separately instead of treating every migration failure as one generic Hyper-V problem.
