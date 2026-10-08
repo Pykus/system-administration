@@ -201,6 +201,54 @@ Common clues:
 - **storage migration failure** → path, permissions, CIFS or free space,
 - **very slow migration** → migration network, transport mode, CPU load or memory write rate.
 
+## Concrete expected output: synthetic lab
+
+The following is a **sample transcript**, not a claim that these commands were executed against a real Hyper-V environment. Assume the lab has two hosts (`HV01`, `HV02`), a running VM (`APP01`), a virtual switch named `Production`, and Kerberos configured for Live Migration. Actual IP addresses, RAM, disk paths, adapter status, and table spacing depend on the host.
+
+Command:
+
+```powershell
+Get-VMHost -ComputerName HV01 | Select-Object VirtualMachineMigrationEnabled,VirtualMachineMigrationAuthenticationType
+```
+
+Expected sample output:
+
+```text
+VirtualMachineMigrationEnabled VirtualMachineMigrationAuthenticationType
+------------------------------ -----------------------------------------
+                          True                                  Kerberos
+```
+
+Command:
+
+```powershell
+Get-VMSwitch -ComputerName HV02 | Select-Object Name,SwitchType
+```
+
+Expected sample output:
+
+```text
+Name       SwitchType
+----       ----------
+Production   External
+```
+
+After a successful migration, command:
+
+```powershell
+Get-VM -ComputerName HV02 -Name APP01 | Select-Object Name,State,Status
+```
+
+Expected sample output:
+
+```text
+Name  State   Status
+----  -----   ------
+APP01 Running Operating normally
+```
+
+The important assertions are that migration is enabled with the intended authentication mode, the destination has the required virtual switch, and the VM is running on the destination. The sample output is illustrative; **the exact output of a real run must be captured and checked**, not inferred from this example. Commands that only change configuration or complete successfully without printing anything should be documented as having **no normal stdout**, followed by a separate verification command.
+
 ## 11. Verify after migration
 
 ```powershell
