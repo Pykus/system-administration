@@ -82,7 +82,16 @@ systemctl show lpic-file-check.service -p Result -p ExecMainStatus
 journalctl -u lpic-file-check.service -b -n 20 --no-pager
 ```
 
-Expected: Result=success and ExecMainStatus=0. The unit can then be inactive because a oneshot exits. To reproduce failure safely, change the checked path to a nonexistent lab-only path, reload definitions, start again, and inspect the nonzero result. Restore the original path and verify success. daemon-reload updates unit definitions; it does not restart a running process.
+Expected behavior: the service succeeds, even though a completed oneshot unit may be inactive.
+
+Concrete expected output for the successful lab run (`systemctl show lpic-file-check.service -p Result -p ExecMainStatus`):
+
+```text
+Result=success
+ExecMainStatus=0
+```
+
+The command exits with code 0. Journal timestamps, PIDs, and ancillary messages vary by machine and are intentionally not presented as exact fixed output. To reproduce failure safely, change the checked path to a nonexistent lab-only path, reload definitions, start again, and inspect the nonzero result. Restore the original path and verify success. daemon-reload updates unit definitions; it does not restart a running process.
 
 ## Three operational scenarios
 
