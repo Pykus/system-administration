@@ -1,0 +1,108 @@
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mój plan i dyżury – DEMO</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#172554;background:#f3f6f9}body{margin:0}header{background:#dcecf9;padding:14px 20px;border-bottom:1px solid #b7c8d8}main{max-width:1280px;margin:auto;padding:14px}.card{background:white;border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin:10px 0}.note{font-size:13px;color:#475569}.error{border-left:5px solid #b91c1c;background:#fef2f2}.gridwrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #cbd5e1;padding:5px;vertical-align:top}th{background:#e8f0f7}.time{width:96px;white-space:nowrap}.slot{width:62px;text-align:center;white-space:nowrap}.lesson{background:#d9eaf7}.duty{background:#fff2cc;font-weight:600}.adminlock{display:inline-block;background:#dbeafe;border-radius:10px;padding:2px 6px;margin-top:3px;font-size:10px;color:#1e3a8a}.wait{color:#92400e;font-weight:700}.mutedcell{color:#94a3b8;text-align:center}select,button{padding:6px 8px;border:1px solid #94a3b8;border-radius:5px;background:white}button{cursor:pointer}.primary{background:#2563eb;color:white;border-color:#1d4ed8}.prefs{overflow:auto}.prefs table{min-width:760px}.prefs td{text-align:center}.prefs select{min-width:112px}.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px}.dot{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-2px}@media(max-width:800px){main{padding:8px}.schedule{min-width:900px}}.relax-item{display:flex;align-items:center;gap:8px;padding:8px;margin:5px 0;border:1px solid #cbd5e1;border-radius:6px;background:#fff}.relax-item.dragging{opacity:.45}.grab{cursor:grab;font-size:18px;color:#64748b}.locked-last{background:#fff}.ord{min-width:24px;font-weight:700}.pref-comment{display:block;width:100%;box-sizing:border-box;margin-top:5px;font-size:12px;padding:5px 6px}\n.source-live{border-left:5px solid #16a34a;background:#f0fdf4}.source-saved{border-left:5px solid #64748b;background:#f8fafc}</style>
+</head><body>
+<header><b>DEMO – mój plan lekcji i dyżury</b><div id="who" class="note"></div></header>
+<main><div id="status" class="card">Wczytuję plan…</div>
+<div id="content" hidden>
+<div id="dutySource" class="card"></div>
+<div class="card">
+<b>Plan tygodnia – lekcje i dyżury w jednej osi czasu</b>
+<div class="note">Niebieskie komórki to lekcje, żółte to dyżury. Dzięki wspólnej osi czasu od razu widać, czy dyżur jest przed pierwszą lekcją, między lekcjami czy po ostatniej lekcji.</div>
+<div class="legend" style="margin:8px 0"><span><i class="dot" style="background:#d9eaf7"></i>lekcja</span><span><i class="dot" style="background:#fff2cc"></i>dyżur</span></div>
+<div class="gridwrap"><div id="schedule"></div></div>
+</div>
+<div class="card">
+<b>Moja kolejność ustępstw</b>
+<div class="note">Ułóż od <b>pierwszego ustępstwa, na które zgadzasz się najłatwiej</b>, do ostatniego. Generator wyczerpie wcześniejsze poziomy przed następnymi. Dodatkowe oczekiwanie jest przypięte na końcu; oczekiwanie co najmniej 2 okresów pozostaje zawsze zabronione.</div>
+<div id="relaxOrder" style="margin-top:8px"></div>
+</div>
+<div class="card">
+<b>Moje preferencje dotyczące dyżurów</b>
+<div class="note">„Preferowana” pomaga solverowi wybierać dany termin. „Niepożądana” oznacza, że solver powinien go unikać. Twarde „nie mogę” ustawia administrator jako blokadę. Zmiana tutaj nie daje dostępu do planu innych nauczycieli.</div>
+<div class="legend" style="margin:8px 0"><span><i class="dot" style="background:#dcfce7"></i>preferowana</span><span><i class="dot" style="background:#fef3c7"></i>niepożądana</span></div>
+<div class="prefs" id="prefs"></div>
+<button class="primary" id="save">Zapisz moje preferencje</button> <span id="saved" class="note"></span>
+</div></div></main>
+<script>
+const qs=new URLSearchParams(location.search), token=qs.get('t')||'';
+const days=[['Pn','Poniedziałek'],['Wt','Wtorek'],['Śr','Środa'],['Czw','Czwartek'],['Pi','Piątek']];
+let data=null,prefs={},prefComments={},relaxOrder=[],dragRelax=null,lastDutySig="",dutyPollTimer=null;
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function lessonText(day,p){let a=data.lessons?.[day]?.[String(p)]||[];return a.map(x=>[x.class,x.subject,x.room].filter(Boolean).map(esc).join(' • ')).join('<br>')}
+function dutiesAt(day,slot){return (data.duties||[]).filter(x=>x.abbr===day&&x.slot===slot)}
+function dutySourceText(){
+ let s=data?.duty_source||{kind:'invalid_saved',label:'Brak zweryfikowanego planu',verified:false};
+ let el=document.getElementById('dutySource');if(!el)return;
+ let verified=!!s.verified;el.className='card '+(verified?'source-live':'source-saved');
+ if(s.kind==='live_verified')el.innerHTML='<b>'+esc(s.label||'Szkic roboczy')+'</b><div class="note"><b>Widok roboczy, jeszcze niezapisany.</b> Ten panel korzysta z tego samego zweryfikowanego source_id co plan administratora: '+esc(s.source_id||'')+'.</div>';
+ else if(s.kind==='calculating_waiting')el.innerHTML='<b>Trwa liczenie nowego planu</b><div class="note">Do czasu znalezienia pierwszego pełnego zweryfikowanego szkicu stare dyżury są ukryte. Panel odświeży się automatycznie.</div>';
+ else if(s.kind==='reference_verified')el.innerHTML='<b>Plan referencyjny</b><div class="note">Solver nie pracuje teraz nad nową wersją. source_id: '+esc(s.source_id||'')+'.</div>';
+ else if(s.kind==='saved_verified')el.innerHTML='<b>Plan zapisany i zweryfikowany</b><div class="note">source_id: '+esc(s.source_id||'')+'.</div>';
+ else el.innerHTML='<b>UWAGA: brak zweryfikowanego pe&#322;nego planu</b><div class="note">Ten stan nie jest oznaczany jako pe&#322;ny.</div>';
+}
+function dutySignature(x){let s=x?.duty_source||{},d=x?.duties||[];return JSON.stringify([s.kind,s.variant_id,s.seq,s.job_status,d.map(z=>[z.scope,z.abbr,z.slot,z.place,z.wait])])}
+async function refreshDuties(){
+ try{
+   let r=await fetch('/api/teacher-portal/'+encodeURIComponent(token),{cache:'no-store'});
+   if(r.ok){
+     let next=await r.json(),sig=dutySignature(next);
+     if(sig!==lastDutySig){
+       data.duties=next.duties||[];data.duty_source=next.duty_source||{};data.admin_locks=next.admin_locks||[];
+       lastDutySig=sig;render()
+     }
+   }
+ }catch(e){}
+ clearTimeout(dutyPollTimer);dutyPollTimer=setTimeout(refreshDuties,1500)
+}
+function lockAt(day,slot){return (data.admin_locks||[]).find(x=>x.abbr===day&&x.slot===slot)||null}
+function dutyText(day,slot){if(data?.duty_source?.kind==='calculating_waiting')return'';let a=dutiesAt(day,slot),l=lockAt(day,slot);let txt=a.map(x=>esc(x.scope)+' &bull; '+esc(x.place)+(x.wait?'<div class="wait">oczekiwanie: '+esc(x.wait)+' lek.</div>':'')).join('<br>');if(l)txt+=(txt?'<br>':'')+'<span class="adminlock">sta&#322;y przydzia&#322; administratora'+(l.location?' &bull; '+esc(l.location):'')+(l.comment?' &bull; '+esc(l.comment):'')+'</span>';return txt}
+function timelineRows(){
+ let rows=[],seen=new Set();
+ for(const pair of days){for(const r of (data.timeline?.[pair[1]]||[])){let k=[r.time,r.kind,r.key,r.label].join('|');if(!seen.has(k)){seen.add(k);rows.push({...r})}}}
+ function mins(x){let m=String(x.time||'').match(/^(\d{1,2}):(\d{2})/);return m?Number(m[1])*60+Number(m[2]):9999}
+ rows.sort((a,b)=>mins(a)-mins(b)||String(a.kind).localeCompare(String(b.kind)));
+ return rows
+}
+function dayHasRow(dayName,row){return (data.timeline?.[dayName]||[]).some(x=>x.kind===row.kind&&String(x.key)===String(row.key)&&String(x.time)===String(row.time))}
+function renderRelaxOrder(){
+ const cat=Object.fromEntries((data.relax_catalog||[]).map(x=>[x.key,x]));
+ let list=relaxOrder.filter(k=>cat[k]);for(const x of (data.relax_catalog||[]))if(!list.includes(x.key))list.push(x.key);
+ list=list.filter(k=>k!=='avoid_wait').concat(list.includes('avoid_wait')?['avoid_wait']:[]);
+ relaxOrder=list;
+ document.getElementById('relaxOrder').innerHTML=list.map((k,i)=>{let x=cat[k]||{label:k},locked=!!x.locked_last,active=(data.relaxed_rules||[]).includes(k);return '<div class="relax-item '+(locked?'locked-last ':'')+(active?'duty':'')+'" draggable="'+(!locked)+'" data-k="'+esc(k)+'"><span class="ord">'+(i+1)+'.</span><span class="grab">'+(locked?'':'☷')+'</span><span>'+esc(x.label)+(active?' <b>(aktywnie poluzowane w bieżącym planie)</b>':'')+'</span></div>'}).join('');
+ document.querySelectorAll('#relaxOrder .relax-item[draggable="true"]').forEach(el=>{
+  el.ondragstart=()=>{dragRelax=el.dataset.k;el.classList.add('dragging')};el.ondragend=()=>el.classList.remove('dragging');el.ondragover=e=>e.preventDefault();
+  el.ondrop=e=>{e.preventDefault();let to=el.dataset.k;if(!dragRelax||dragRelax===to)return;let a=relaxOrder.filter(k=>k!=='avoid_wait'),from=a.indexOf(dragRelax),idx=a.indexOf(to);if(from<0||idx<0)return;a.splice(from,1);a.splice(idx,0,dragRelax);relaxOrder=a.concat(relaxOrder.includes('avoid_wait')?['avoid_wait']:[]);dragRelax=null;renderRelaxOrder()}
+ });
+}
+function render(){
+ document.getElementById('who').textContent=data.teacher.name;dutySourceText();
+ let h='<table class="schedule"><thead><tr><th class="time">Godzina</th><th class="slot">Slot</th>'+days.map(d=>'<th>'+d[0]+'</th>').join('')+'</tr></thead><tbody>';
+ for(const row of timelineRows()){
+   let label=row.kind==='LEKCJA'?'L'+esc(row.label):esc(row.label);
+   h+='<tr><th class="time">'+esc(row.time)+'</th><th class="slot">'+label+'</th>';
+   for(const d of days){
+     if(!dayHasRow(d[1],row)){h+='<td class="mutedcell">—</td>';continue}
+     if(row.kind==='LEKCJA'){let x=lessonText(d[0],row.key);h+='<td class="'+(x?'lesson':'')+'">'+(x||'—')+'</td>'}
+     else {let x=dutyText(d[0],row.label);h+='<td class="'+(x?'duty':'')+'">'+(x||'—')+'</td>'}
+   }
+   h+='</tr>';
+ }
+ h+='</tbody></table>';document.getElementById('schedule').innerHTML=h;
+ let slots=[...new Set(data.breaks.map(b=>b.label))];
+ let timeBy={};for(const b of data.breaks||[])if(!(b.label in timeBy))timeBy[b.label]=b.time||'';
+ let ph='<table><thead><tr><th>Przerwa</th><th>Godzina</th>'+days.map(d=>'<th>'+d[0]+'</th>').join('')+'</tr></thead><tbody>';
+ for(const slot of slots){ph+='<tr><th>'+esc(slot)+'</th><td>'+esc(timeBy[slot]||'')+'</td>'+days.map(d=>{let k=d[0]+'|'+slot,v=prefs[k]||'neutral',c=prefComments[k]||'',l=lockAt(d[0],slot),dis=l?' disabled':'';return '<td><select data-k="'+esc(k)+'"'+dis+'><option value="neutral" '+(v==='neutral'?'selected':'')+'>neutralna</option><option value="prefer" '+(v==='prefer'?'selected':'')+'>preferowana</option><option value="avoid" '+(v==='avoid'?'selected':'')+'>niepo&#380;&#261;dana</option></select><input type="text" class="pref-comment" data-comment-k="'+esc(k)+'" value="'+esc(c)+'" placeholder="opcjonalny komentarz / pow&#243;d"'+dis+'>'+(l?'<div class="adminlock">sta&#322;y przydzia&#322; administratora'+(l.comment?' &bull; '+esc(l.comment):'')+'</div>':'')+'</td>'}).join('')+'</tr>'}
+ ph+='</tbody></table>';document.getElementById('prefs').innerHTML=ph;
+ document.querySelectorAll('#prefs select').forEach(x=>x.onchange=()=>{if(x.value==='neutral')delete prefs[x.dataset.k];else prefs[x.dataset.k]=x.value});document.querySelectorAll('#prefs input[data-comment-k]').forEach(x=>x.oninput=()=>{let k=x.dataset.commentK,v=x.value.trim();if(v)prefComments[k]=v.slice(0,500);else delete prefComments[k]});
+ renderRelaxOrder();
+}
+async function load(){
+ if(!token){document.getElementById('status').className='card error';document.getElementById('status').textContent='Brak indywidualnego tokenu w linku.';return}
+ try{let r=await fetch('/api/teacher-portal/'+encodeURIComponent(token),{cache:'no-store'});if(!r.ok)throw new Error('Nieprawidłowy lub nieaktywny link.');data=await r.json();prefs={...(data.preferences||{})};prefComments={...(data.preference_comments||{})};relaxOrder=[...(data.relax_order||[])];lastDutySig=dutySignature(data);document.getElementById('status').hidden=true;document.getElementById('content').hidden=false;render();clearTimeout(dutyPollTimer);dutyPollTimer=setTimeout(refreshDuties,1500)}catch(e){document.getElementById('status').className='card error';document.getElementById('status').textContent=e.message}
+}
+document.getElementById('save').onclick=async()=>{let r=await fetch('/api/teacher-portal/'+encodeURIComponent(token)+'/preferences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preferences:prefs,comments:prefComments,relax_order:relaxOrder})});document.getElementById('saved').textContent=r.ok?'Zapisano.':'Nie udało się zapisać.';if(r.ok)setTimeout(()=>document.getElementById('saved').textContent='',2500)};
+load();
+</script></body></html>

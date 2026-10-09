@@ -1,0 +1,17 @@
+data/
+logs/
+__pycache__/
+*.pyc
+*.sqlite
+*.db
+*.log
+*.exe
+*.bak
+*.tmp
+*.out
+*.err
+*.zip
+_reg*.txt
+_t*.txt
+_after*.txt
+*.json

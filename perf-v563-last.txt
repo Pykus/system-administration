@@ -1,0 +1,83 @@
+{
+  "version": "5.63",
+  "runs": [
+    {
+      "seed_offset": 0,
+      "wall_s": 55.691,
+      "full": true,
+      "missing": 0,
+      "coverage13": {
+        "required": 80,
+        "filled": 80,
+        "missing": 0
+      },
+      "coverageSchool": {
+        "required": 385,
+        "filled": 385,
+        "missing": 0
+      },
+      "human_guardrail_ok": true,
+      "fairness_normalized_deviation": 0.2273,
+      "foreign13": 6,
+      "foreign13_share": 0.075,
+      "foreign13_general": 6,
+      "foreign13_wf": 0,
+      "wf13_share": 0.0,
+      "foreign_school": 56,
+      "max_weekly": 8,
+      "max_daily": 4,
+      "longest_consecutive": 1
+    },
+    {
+      "seed_offset": 17,
+      "wall_s": 46.859,
+      "full": true,
+      "missing": 0,
+      "coverage13": {
+        "required": 80,
+        "filled": 80,
+        "missing": 0
+      },
+      "coverageSchool": {
+        "required": 385,
+        "filled": 385,
+        "missing": 0
+      },
+      "human_guardrail_ok": true,
+      "fairness_normalized_deviation": 0.1223,
+      "foreign13": 8,
+      "foreign13_share": 0.1,
+      "foreign13_general": 8,
+      "foreign13_wf": 0,
+      "wf13_share": 0.0,
+      "foreign_school": 53,
+      "max_weekly": 8,
+      "max_daily": 4,
+      "longest_consecutive": 1
+    }
+  ],
+  "checks": {
+    "all_full": true,
+    "all_human": true,
+    "foreign13_share_le_20pct": true,
+    "wf13_share_le_5pct": true,
+    "each_run_le_60s": true,
+    "architecture_registry_ok": true
+  },
+  "architecture": {
+    "ok": true,
+    "missing_registry": [],
+    "stale_registry": [],
+    "bad_layers": [],
+    "count_actual": 23,
+    "count_registered": 23
+  },
+  "summary": {
+    "median_wall_s": 51.275,
+    "max_foreign13_share": 0.1,
+    "max_foreign13": 8,
+    "max_wf13": 0,
+    "max_wf13_share": 0.0
+  },
+  "ok": true
+}
